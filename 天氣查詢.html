@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather App</title>
+  <!-- 外部樣式表 -->
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+
+<body>
+  <div class="container">
+    <p class="section-label">Weather App</p>
+    <h1>台灣天氣</h1>
+
+    <!-- ── 查詢控制列 ── -->
+    <div class="controls">
+      <select id="city-select">
+        <option value="">選擇城市</option>
+        <!-- value = 中央氣象署 API 使用的縣市中文名稱 -->
+        <option value="臺北市">台北市</option>
+        <option value="新北市">新北市</option>
+        <option value="桃園市">桃園市</option>
+        <option value="新竹市">新竹市</option>
+        <option value="臺中市">台中市</option>
+        <option value="臺南市">台南市</option>
+        <option value="高雄市">高雄市</option>
+        <option value="基隆市">基隆市</option>
+        <option value="宜蘭縣">宜蘭縣</option>
+        <option value="花蓮縣">花蓮縣</option>
+        <option value="臺東縣">臺東縣</option>
+      </select>
+      <button id="get-weather-btn">查詢</button>
+    </div>
+
+    <!-- ── 天氣結果卡片 ── -->
+    <div id="weather-result">
+      <div class="live-badge">預報</div>
+
+      <div class="city-row">
+        <span id="location"></span>
+        <span id="weather-icon"></span> <!-- 天氣 emoji，由 JS 填入 -->
+      </div>
+      <div id="weather-main"></div> <!-- 天氣現象中文，例如「多雲時晴」 -->
+
+      <div id="main-temperature"></div> <!-- 最低/最高平均溫度 -->
+      <div id="temp-range"></div> <!-- 最低溫 ↓ 最高溫 ↑ -->
+
+      <!-- 降雨機率 + 天氣現象 tag -->
+      <div class="tag-row">
+        <span class="tag" id="pop-tag"></span>
+        <span class="tag" id="wx-tag"></span>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">降雨機率</div>
+          <div class="stat-val" id="pop"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">最低溫</div>
+          <div class="stat-val" id="temp-min"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">舒適度</div>
+          <div class="stat-val" id="comfort"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── 設定 ──────────────────────────────────────────────────────────────
+    // 請至 https://opendata.cwa.gov.tw 申請並填入您的授權碼
+    const API_KEY = 'CWA-997C4594-F8FA-423E-AD46-9F74087D75AD';
+    const DATASET_ID = 'F-C0032-001'; // 36小時縣市天氣預報
+    const BASE_URL = 'https://opendata.cwa.gov.tw/api/v1/rest/datastore';
+
+    // ── 天氣代碼 → Emoji 對照表 ───────────────────────────────────────────
+    const WX_EMOJI = {
+      1: '☀️',  // 晴
+      2: '🌤',  // 晴時多雲
+      3: '🌤',  // 晴時多雲
+      4: '🌥',  // 多雲時晴
+      5: '🌥',  // 多雲時晴
+      6: '☁️',  // 多雲
+      7: '☁️',  // 多雲
+      8: '🌧',  // 多雲時陰
+      9: '🌧',  // 多雲時陰短暫雨
+      10: '🌦',  // 多雲時陰偶陣雨
+      11: '🌦',  // 陰短暫雨
+      12: '🌦',  // 陰偶陣雨
+      13: '🌧',  // 陰天
+      14: '🌧',  // 陰短暫雨
+      15: '⛈',  // 短暫雷雨
+      16: '⛈',  // 雷雨
+      17: '🌩',  // 短暫陣雨或雷雨
+      18: '⛈',  // 陣雨或雷雨
+      19: '🌨',  // 多雲短暫陣雨雪
+      20: '❄️',  // 多雲短暫雪
+      21: '❄️',  // 多雲期間短暫陣雪
+      22: '🌁',  // 霧
+      23: '🌁',  // 霧
+      24: '🌁',  // 霧
+    };
+
+    // ── API 呼叫 ──────────────────────────────────────────────────────────
+    /**
+     * 向中央氣象署取得指定縣市的 36 小時天氣預報
+     * @param {string} locationName - 縣市名稱（中文，例如「臺北市」）
+     * @returns {Object|null} 天氣資料 或 null（失敗時）
+     */
+    async function fetchWeather(locationName) {
+      const url =
+        `${BASE_URL}/${DATASET_ID}` +
+        `?Authorization=${API_KEY}` +
+        `&locationName=${encodeURIComponent(locationName)}` +
+        `&format=JSON`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const location = json?.records?.location?.[0];
+        if (!location) throw new Error('找不到該縣市資料');
+        return location;
+      } catch (err) {
+        console.error('[CWA API Error]', err);
+        return null;
+      }
+    }
+
+    // ── 資料解析工具 ──────────────────────────────────────────────────────
+    /**
+     * 從 weatherElement 陣列中，依要素名稱取出第一個時段的值
+     * @param {Array}  elements - location.weatherElement
+     * @param {string} name     - 要素名稱，例如 'Wx', 'PoP', 'MinT', 'MaxT'
+     * @returns {string} parameterValue 或 'N/A'
+     */
+    // PoP / MinT / MaxT / CI 的值都在 parameterName
+    // Wx 的代碼在 parameterValue，中文名在 parameterName
+    const getElement = (elements, name) =>
+      elements.find(e => e.elementName === name)?.time?.[0]?.parameter?.parameterName ?? 'N/A';
+
+    // Wx 天氣代碼（數字）單獨用 parameterValue
+    const getWxCode = elements =>
+      elements.find(e => e.elementName === 'Wx')?.time?.[0]?.parameter?.parameterValue ?? '0';
+
+    // ── 畫面更新 ──────────────────────────────────────────────────────────
+    /**
+     * 查詢天氣並將結果渲染至卡片
+     * @param {string} locationName - 縣市中文名稱
+     */
+    async function showWeather(locationName) {
+      const location = await fetchWeather(locationName);
+      if (!location) { alert('查詢失敗，請確認 API 授權碼是否正確，或稍後再試。'); return; }
+
+      const elements = location.weatherElement;
+
+      // 解析各天氣要素
+      const wxCode = getWxCode(elements);           // 天氣代碼（數字字串）
+      const wxName = getElement(elements, 'Wx');    // 天氣現象中文
+      const pop = getElement(elements, 'PoP');  // 降雨機率 (%)
+      const minT = getElement(elements, 'MinT'); // 最低氣溫 (°C)
+      const maxT = getElement(elements, 'MaxT'); // 最高氣溫 (°C)
+      const ci = getElement(elements, 'CI');   // 舒適度
+
+      // 計算代表溫度（最低與最高的平均，四捨五入）
+      const avgTemp = minT !== 'N/A' && maxT !== 'N/A'
+        ? Math.round((Number(minT) + Number(maxT)) / 2)
+        : 'N/A';
+
+      // 天氣 emoji
+      const emoji = WX_EMOJI[Number(wxCode)] ?? '🌡';
+
+      // 填入 DOM
+      document.getElementById('location').textContent = location.locationName;
+      document.getElementById('weather-icon').textContent = emoji;
+      document.getElementById('weather-main').textContent = wxName;
+      document.getElementById('main-temperature').textContent = avgTemp !== 'N/A' ? `${avgTemp}°C` : 'N/A';
+      document.getElementById('temp-range').textContent = `${minT}°C ↓　${maxT}°C ↑`;
+      document.getElementById('pop').textContent = pop !== 'N/A' ? `${pop}%` : 'N/A';
+      document.getElementById('temp-min').textContent = minT !== 'N/A' ? `${minT}°C` : 'N/A';
+      document.getElementById('comfort').textContent = ci !== 'N/A' ? ci : 'N/A';
+      document.getElementById('pop-tag').textContent = `降雨 ${pop !== 'N/A' ? pop + '%' : 'N/A'}`;
+      document.getElementById('wx-tag').textContent = ci !== 'N/A' ? ci : wxName;
+
+      document.getElementById('weather-result').style.display = 'block';
+    }
+
+    // ── 事件綁定 ──────────────────────────────────────────────────────────
+    document.getElementById('get-weather-btn').addEventListener('click', () => {
+      const city = document.getElementById('city-select').value;
+      if (!city) return;
+      showWeather(city);
+    });
+  </script>
+</body>
+
+</html>
